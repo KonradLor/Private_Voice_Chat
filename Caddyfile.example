@@ -1,0 +1,16 @@
+# Caddy fragmentas. Iterpk i savo esama Caddyfile hoste.
+# Caddy automatiskai gauna ir atnaujina Let's Encrypt SSL sertifikata.
+#
+# Pakeisk domena i savo. WebSocket (signaling) veikia automatiskai -
+# reverse_proxy persiuncia Upgrade antrastes be papildomos konfiguracijos.
+
+voice.tavo-domenas.lt {
+    reverse_proxy 127.0.0.1:8000
+}
+
+# TURN serveris (coturn) NEEINA per Caddy - jis dirba tiesiogiai portais
+# 3478 (UDP/TCP) ir relay diapazonu 49160-49200/UDP. Siuos portus reikia
+# atidaryti Oracle Security List / iptables (zr. README.md).
+#
+# Jei nori TURN per TLS (turns:// port 5349), tai atskira tema -
+# coturn pats apsitarnauja sertifikatus arba dalinasi Caddy issaugotais.

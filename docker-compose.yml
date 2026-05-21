@@ -1,0 +1,32 @@
+# Voice Chat - du konteineriai:
+#   app    - FastAPI signalizacija (klausosi tik 127.0.0.1, Caddy proxina)
+#   coturn - TURN/STUN serveris, kad WebRTC veiktu ir uz grieztu NAT
+#
+# Reiksmes imamos is .env failo (zr. .env.example).
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Tik lokalus prieinamumas - HTTPS/proxy tvarko Caddy hoste.
+      - "127.0.0.1:8000:8000"
+
+  coturn:
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    # Host tinklas butinas, kad relay UDP portai veiktu teisingai debesyje.
+    network_mode: host
+    command:
+      - -n
+      - --no-cli
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET}
+      - --realm=${TURN_REALM}
+      - --listening-port=3478
+      - --fingerprint
+      - --no-multicast-peers
+      - --min-port=49160
+      - --max-port=49200
+      - --external-ip=${PUBLIC_IP}

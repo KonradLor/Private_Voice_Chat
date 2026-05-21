@@ -1,0 +1,37 @@
+Copyright (c) 2026 Konrad Lorenz. All Rights Reserved.
+
+PROPRIETARY AND CONFIDENTIAL
+
+This software, including its source code, design, and all associated files
+(the "Software"), is the proprietary and confidential property of
+Konrad Lorenz (the "Author").
+
+NO LICENSE OR PERMISSION IS GRANTED.
+
+You may NOT, without the prior, explicit, written permission of the Author:
+  - use, run, or deploy the Software, in whole or in part;
+  - copy, reproduce, or store the Software;
+  - modify, adapt, translate, or create derivative works of the Software;
+  - merge, publish, distribute, sublicense, rent, lease, or sell the Software;
+  - remove or alter this notice.
+
+Viewing this repository does not grant any rights to use the Software. The
+availability of the source code here is not, and shall not be construed as,
+a grant of any license.
+
+To request a license or any permission, contact the Author:
+  klorenz.dev@gmail.com
+
+THIRD-PARTY COMPONENTS
+Components and dependencies developed by third parties (for example, but not
+limited to: FastAPI, Starlette, uvicorn, and coturn) remain the property of
+their respective owners and are governed by their own licenses. This notice
+applies only to the original code authored by the Author.
+
+DISCLAIMER OF WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

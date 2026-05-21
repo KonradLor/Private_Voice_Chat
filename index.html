@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="lt">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+<meta name="theme-color" content="#0a0c18" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<title>Voice Chat</title>
+<style>
+  :root {
+    --bg-0: #070912;
+    --bg-1: #11142a;
+    --glass: rgba(255, 255, 255, 0.055);
+    --glass-strong: rgba(255, 255, 255, 0.09);
+    --glass-border: rgba(255, 255, 255, 0.12);
+    --glass-border-hi: rgba(255, 255, 255, 0.22);
+    --text: #eef0f8;
+    --muted: #9aa0bd;
+    --accent: #7c8cff;
+    --accent-2: #b07cff;
+    --green: #4ade80;
+    --red: #fb7185;
+    --radius: 26px;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+    color: var(--text);
+    background: var(--bg-0);
+    overflow: hidden;
+    position: relative;
+  }
+  /* Spalvoti "blob" fonai */
+  .bg-blobs { position: fixed; inset: 0; z-index: 0; overflow: hidden; }
+  .blob { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .55; }
+  .blob.b1 { width: 60vmax; height: 60vmax; top: -20vmax; left: -10vmax; background: radial-gradient(circle, #2a2d6e, transparent 65%); }
+  .blob.b2 { width: 50vmax; height: 50vmax; bottom: -15vmax; right: -10vmax; background: radial-gradient(circle, #5a2a7e, transparent 65%); }
+  .blob.b3 { width: 40vmax; height: 40vmax; top: 35%; left: 45%; background: radial-gradient(circle, #1f3a6e, transparent 65%); opacity: .4; }
+
+  .stage {
+    position: relative; z-index: 1;
+    height: 100%; width: 100%;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    padding-bottom: calc(20px + var(--safe-b));
+  }
+
+  /* Bendras glass blokas */
+  .glass {
+    background: var(--glass);
+    backdrop-filter: blur(22px) saturate(140%);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 40px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.08);
+  }
+  .hidden { display: none !important; }
+
+  /* ---------- LOBBY ---------- */
+  #lobby { width: 100%; max-width: 440px; padding: 34px 30px; }
+  .brand { display: flex; align-items: center; gap: 13px; margin-bottom: 10px; }
+  .brand .mark {
+    width: 46px; height: 46px; border-radius: 15px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: grid; place-items: center; font-size: 23px;
+    box-shadow: 0 6px 20px rgba(124,140,255,.4);
+  }
+  .brand h1 { font-size: 24px; font-weight: 680; letter-spacing: -.5px; }
+  .lead { color: var(--muted); font-size: 14px; line-height: 1.55; margin: 8px 0 28px; }
+
+  label { display: block; font-size: 12.5px; color: var(--muted); margin: 0 0 8px; font-weight: 500; }
+  input {
+    width: 100%; padding: 15px 16px; border-radius: 15px;
+    background: rgba(255,255,255,.04); border: 1px solid var(--glass-border);
+    color: var(--text); font-size: 16px; outline: none; transition: border .15s, background .15s;
+  }
+  input::placeholder { color: #5a6080; }
+  input:focus { border-color: var(--accent); background: rgba(124,140,255,.08); }
+  input.code-input { letter-spacing: 6px; text-transform: uppercase; font-weight: 700; text-align: center; font-size: 19px; }
+
+  button { font-family: inherit; cursor: pointer; border: none; transition: transform .08s, opacity .15s, background .15s; }
+  button:active { transform: scale(.985); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .btn {
+    width: 100%; padding: 16px; border-radius: 15px; font-size: 15.5px; font-weight: 650; color: white;
+    display: flex; align-items: center; justify-content: center; gap: 9px;
+  }
+  .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 8px 24px rgba(124,140,255,.35); }
+  .btn-glass { background: var(--glass-strong); border: 1px solid var(--glass-border); }
+  .mt { margin-top: 14px; }
+  .divider { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: 12px; margin: 24px 0; }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--glass-border); }
+  .err { color: var(--red); font-size: 13px; margin-top: 14px; min-height: 17px; text-align: center; }
+
+  /* ---------- ROOM ---------- */
+  #room { width: 100%; max-width: 920px; height: 100%; max-height: 760px; display: flex; flex-direction: column; gap: 14px; padding: 0; background: transparent; }
+  .topbar { display: flex; gap: 14px; align-items: stretch; }
+  .topbar .status { flex: 1; padding: 16px 20px; display: flex; flex-direction: column; justify-content: center; }
+  .status .live-row { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 600; }
+  .live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 var(--green); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(74,222,128,.5)} 70%{box-shadow:0 0 0 9px rgba(74,222,128,0)} 100%{box-shadow:0 0 0 0 rgba(74,222,128,0)} }
+  .status .sub { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+  .code-tile { padding: 14px 20px; display: flex; flex-direction: column; justify-content: center; cursor: pointer; min-width: 130px; transition: border-color .15s; }
+  .code-tile:hover { border-color: var(--glass-border-hi); }
+  .code-tile .lbl { font-size: 11px; color: var(--muted); letter-spacing: 1px; }
+  .code-tile .val { font-size: 23px; font-weight: 750; letter-spacing: 4px; margin-top: 2px; }
+  .code-tile .copy { font-size: 11px; color: var(--accent); margin-top: 3px; }
+
+  /* Bento dalyviu tinklelis */
+  .bento {
+    flex: 1; display: grid; gap: 14px; overflow-y: auto; padding: 2px;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    grid-auto-rows: minmax(150px, auto);
+    align-content: start;
+  }
+  .tile {
+    position: relative; padding: 20px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 13px; text-align: center;
+    transition: border-color .25s, transform .25s, box-shadow .25s;
+  }
+  .tile.me { background: var(--glass-strong); }
+  .tile.speaking { border-color: rgba(74,222,128,.55); box-shadow: 0 0 0 1px rgba(74,222,128,.35), 0 8px 40px rgba(74,222,128,.18); }
+  .tile .avatar {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: grid; place-items: center; font-weight: 750; font-size: 24px;
+    transition: box-shadow .2s; flex-shrink: 0;
+  }
+  .tile.speaking .avatar { box-shadow: 0 0 0 4px rgba(74,222,128,.4); }
+  .tile .pname { font-weight: 640; font-size: 15.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile .prole { font-size: 12px; color: var(--muted); }
+  .tile .mic { position: absolute; top: 14px; right: 14px; font-size: 16px; opacity: .7; }
+  .tile .mic.off { color: var(--red); opacity: 1; }
+  .tile .vol { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 4px; }
+  .tile .vol-ico { font-size: 13px; opacity: .7; }
+  .tile .vol-pct { font-size: 11px; color: var(--muted); min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+  .vol-slider {
+    -webkit-appearance: none; appearance: none; flex: 1; height: 4px; border-radius: 4px;
+    background: rgba(255,255,255,.16); outline: none; cursor: pointer;
+  }
+  .vol-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 2px 6px rgba(0,0,0,.45); cursor: pointer;
+  }
+  .vol-slider::-moz-range-thumb {
+    width: 15px; height: 15px; border: none; border-radius: 50%;
+    background: var(--accent); cursor: pointer;
+  }
+
+  /* Valdikliai */
+  .controls { display: flex; gap: 14px; padding: 14px; }
+  .controls .ctl { flex: 1; padding: 17px; border-radius: 18px; font-size: 15px; font-weight: 650; color: white; display: flex; align-items: center; justify-content: center; gap: 9px; }
+  .ctl-mic-on { background: var(--glass-strong); border: 1px solid var(--glass-border); }
+  .ctl-mic-off { background: var(--red); }
+  .ctl-leave { background: rgba(251,113,133,.16); border: 1px solid rgba(251,113,133,.4); color: var(--red); flex: 0 0 auto; min-width: 120px; }
+
+  .toast {
+    position: fixed; bottom: calc(24px + var(--safe-b)); left: 50%; transform: translateX(-50%) translateY(10px);
+    background: rgba(20,22,40,.85); backdrop-filter: blur(14px); border: 1px solid var(--glass-border);
+    color: var(--text); padding: 12px 20px; border-radius: 14px; font-size: 14px; z-index: 50;
+    opacity: 0; transition: opacity .25s, transform .25s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .audio-unlock {
+    position: fixed; top: calc(18px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
+    z-index: 60; cursor: pointer; padding: 13px 22px; border-radius: 16px; font-size: 14.5px; font-weight: 600;
+    color: white; background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 10px 30px rgba(124,140,255,.45); border: 1px solid rgba(255,255,255,.18);
+    animation: unlock-bob 1.8s ease-in-out infinite;
+  }
+  @keyframes unlock-bob { 0%,100%{transform:translateX(-50%) translateY(0)} 50%{transform:translateX(-50%) translateY(-4px)} }
+
+  /* Rysio kokybes taskelis */
+  .qdot { position: absolute; top: 14px; left: 14px; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); transition: background .3s; }
+  .qdot.good { background: var(--green); box-shadow: 0 0 6px rgba(74,222,128,.7); }
+  .qdot.ok   { background: #fbbf24; box-shadow: 0 0 6px rgba(251,191,36,.7); }
+  .qdot.bad  { background: var(--red); box-shadow: 0 0 6px rgba(251,113,133,.8); }
+
+  /* Chat mygtuko badge */
+  .ctl-chat { position: relative; }
+  .chat-badge {
+    position: absolute; top: 8px; right: 12px; min-width: 19px; height: 19px; padding: 0 5px;
+    border-radius: 10px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* Chat panele */
+  .chat-panel {
+    position: fixed; z-index: 55; display: flex; flex-direction: column;
+    top: 50%; right: 24px; transform: translateY(-50%);
+    width: 340px; height: min(70vh, 560px); padding: 0; overflow: hidden;
+  }
+  .chat-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid var(--glass-border); font-weight: 650; font-size: 15px; }
+  .chat-close { background: transparent; color: var(--muted); font-size: 18px; line-height: 1; padding: 4px 8px; border-radius: 8px; }
+  .chat-close:hover { color: var(--text); }
+  .chat-msgs { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 85%; align-self: flex-start; }
+  .msg.mine { align-self: flex-end; text-align: right; }
+  .msg-name { font-size: 11px; color: var(--muted); margin-bottom: 3px; padding: 0 4px; }
+  .msg-text {
+    display: inline-block; padding: 9px 13px; border-radius: 14px; font-size: 14px; line-height: 1.4;
+    background: var(--glass-strong); border: 1px solid var(--glass-border); word-break: break-word; text-align: left;
+  }
+  .msg.mine .msg-text { background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: transparent; }
+  .chat-input { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--glass-border); }
+  .chat-input input { flex: 1; padding: 12px 14px; font-size: 15px; }
+  .chat-send {
+    width: 46px; flex-shrink: 0; border-radius: 13px; font-size: 16px; color: #fff;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  }
+
+  @media (max-width: 600px) {
+    .chat-panel { top: auto; bottom: 0; right: 0; left: 0; width: auto; transform: none; height: 70vh;
+      border-radius: var(--radius) var(--radius) 0 0; }
+  }
+
+  /* ---------- MOBILE ---------- */
+  @media (max-width: 600px) {
+    .stage { padding: 14px; padding-bottom: calc(14px + var(--safe-b)); align-items: stretch; }
+    #lobby { padding: 28px 22px; align-self: center; }
+    #room { max-height: none; gap: 12px; }
+    .topbar { flex-direction: row; }
+    .status { padding: 13px 16px; }
+    .code-tile { min-width: 110px; padding: 11px 15px; }
+    .code-tile .val { font-size: 19px; letter-spacing: 3px; }
+    .bento { grid-template-columns: repeat(2, 1fr); grid-auto-rows: minmax(128px, auto); gap: 12px; }
+    .tile { padding: 14px; gap: 9px; }
+    .tile .avatar { width: 52px; height: 52px; font-size: 20px; }
+    .tile .pname { font-size: 14px; }
+    .controls { gap: 10px; padding: 12px; position: sticky; bottom: 0; }
+    .controls .ctl { padding: 16px; font-size: 14.5px; }
+    .ctl-leave { min-width: 96px; }
+    .brand h1 { font-size: 22px; }
+  }
+  @media (max-width: 360px) {
+    .bento { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-blobs">
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <div class="blob b3"></div>
+</div>
+
+<div class="stage">
+
+  <!-- LOBBY -->
+  <div class="glass hidden" id="lobby">
+    <div class="brand">
+      <div class="mark">🎙️</div>
+      <h1>Voice Chat</h1>
+    </div>
+    <p class="lead">Privatūs balso pokalbiai su draugais. Garsas keliauja tiesiogiai tarp jūsų ir yra šifruojamas — serveris jo nemato.</p>
+
+    <button class="btn btn-primary" id="createBtn">＋ Sukurti naują kambarį</button>
+
+    <div class="divider">arba prisijunk</div>
+
+    <label for="joinCode">Kambario kodas</label>
+    <input id="joinCode" class="code-input" maxlength="6" placeholder="ABC123" autocomplete="off" inputmode="latin" />
+    <label for="joinName" class="mt">Tavo vardas</label>
+    <input id="joinName" maxlength="20" placeholder="pvz. Jonas" autocomplete="off" />
+    <button class="btn btn-glass mt" id="joinBtn">Prisijungti →</button>
+
+    <div class="err" id="lobbyError"></div>
+  </div>
+
+  <!-- ROOM -->
+  <div class="hidden" id="room">
+    <div class="topbar">
+      <div class="glass status">
+        <div class="live-row"><span class="live-dot"></span> Pokalbis aktyvus</div>
+        <div class="sub" id="peerCount">1 dalyvis</div>
+      </div>
+      <div class="glass code-tile" id="codeTile" title="Spustelėk, kad nukopijuotum kvietimo nuorodą">
+        <div class="lbl">KODAS</div>
+        <div class="val" id="roomCode">—</div>
+        <div class="copy">📋 kviesti</div>
+      </div>
+    </div>
+
+    <div class="bento" id="bento"></div>
+
+    <div class="controls">
+      <button class="ctl ctl-mic-on glass" id="muteBtn">🎤 Mikrofonas</button>
+      <button class="ctl ctl-chat glass" id="chatBtn">💬 Pokalbis<span class="chat-badge hidden" id="chatBadge">0</span></button>
+      <button class="ctl ctl-leave" id="leaveBtn">⏻ Išeiti</button>
+    </div>
+  </div>
+
+  <!-- CHAT PANEL -->
+  <div class="chat-panel glass hidden" id="chatPanel">
+    <div class="chat-head">
+      <span>💬 Pokalbis</span>
+      <button class="chat-close" id="chatClose">✕</button>
+    </div>
+    <div class="chat-msgs" id="chatMsgs"></div>
+    <form class="chat-input" id="chatForm">
+      <input id="chatText" placeholder="Rašyk žinutę…" maxlength="500" autocomplete="off" />
+      <button type="submit" class="chat-send">➤</button>
+    </form>
+  </div>
+
+</div>
+
+<div class="audio-unlock hidden" id="audioUnlock">🔊 Palieskite, kad įjungtumėte garsą</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = {
+  ws: null, pcs: {}, localStream: null,
+  myId: null, isHost: false, myName: "",
+  names: {}, muted: false, code: null,
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  gains: {},     // peerId -> Web Audio GainNode (lokalus garsumas)
+  volumes: {},   // peerId -> garsumo koef. (1 = 100%, gali virsyti 1)
+  audioCtxs: {}, // peerId -> AudioContext
+  channels: {},  // peerId -> RTCDataChannel (chatui, P2P)
+  quality: {},   // peerId -> "good" | "ok" | "bad"
+  prevStats: {}, // peerId -> {lost, recv} (packet loss delta skaiciavimui)
+  greeted: new Set(), // peerId, kuriuos jau "pasveikinom" (kad nesikartotu pranesimai)
+  unread: 0,
+  chatOpen: false,
+  uiCtx: null,   // AudioContext UI garseliams (join/leave)
+};
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(t._t);
+  t._t = setTimeout(() => t.classList.remove("show"), 2200);
+}
+function initials(name) { return (name || "?").trim().slice(0, 2).toUpperCase(); }
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// Parsisiunciam ICE konfigūraciją (STUN + laikini TURN kredencialai) iš serverio
+async function loadIceServers() {
+  try {
+    const res = await fetch("/api/ice");
+    const data = await res.json();
+    if (Array.isArray(data.iceServers) && data.iceServers.length) {
+      state.iceServers = data.iceServers;
+    }
+  } catch { /* liekam su numatytu STUN */ }
+}
+
+// ---------- Lobby ----------
+$("lobby").classList.remove("hidden");
+
+$("createBtn").addEventListener("click", async () => {
+  const name = (prompt("Koks tavo vardas?", "Adminas") || "").trim();
+  if (!name) return;
+  state.myName = name;
+  $("lobbyError").textContent = "";
+  try {
+    const res = await fetch("/api/rooms", { method: "POST" });
+    const data = await res.json();
+    await enterRoom(data.code);
+  } catch { $("lobbyError").textContent = "Nepavyko sukurti kambario."; }
+});
+
+$("joinBtn").addEventListener("click", async () => {
+  const code = $("joinCode").value.trim().toUpperCase();
+  const name = $("joinName").value.trim();
+  $("lobbyError").textContent = "";
+  if (code.length < 6) { $("lobbyError").textContent = "Įvesk pilną 6 simbolių kodą."; return; }
+  if (!name) { $("lobbyError").textContent = "Įvesk savo vardą."; return; }
+  state.myName = name;
+  const res = await fetch("/api/rooms/" + code);
+  const data = await res.json();
+  if (!data.exists) { $("lobbyError").textContent = "Toks kambarys neegzistuoja."; return; }
+  await enterRoom(code);
+});
+
+const urlCode = new URLSearchParams(location.search).get("room");
+if (urlCode) $("joinCode").value = urlCode.toUpperCase();
+
+// ---------- Kambarys ----------
+async function enterRoom(code) {
+  state.code = code;
+  try {
+    state.localStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: false,
+    });
+  } catch {
+    $("lobbyError").textContent = "Reikia leidimo naudoti mikrofoną.";
+    return;
+  }
+  await loadIceServers();
+
+  $("lobby").classList.add("hidden");
+  $("room").classList.remove("hidden");
+  $("roomCode").textContent = code;
+  renderPeers();
+  connectSignaling(code);
+  setInterval(pollQuality, 3000);
+}
+
+function connectSignaling(code) {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws/${code}`);
+  state.ws = ws;
+
+  ws.onmessage = async (ev) => {
+    const msg = JSON.parse(ev.data);
+    switch (msg.type) {
+      case "welcome":
+        state.myId = msg.peerId;
+        state.isHost = msg.isHost;
+        state.names[msg.peerId] = state.myName;
+        // Jau esancius dalyvius zymime "pasveikintais" - jiems pranesimu nerodome.
+        msg.peers.forEach((pid) => state.greeted.add(pid));
+        for (const pid of msg.peers) await createPeer(pid, true);
+        renderPeers();
+        break;
+      case "peer-joined":
+        playBeep("join");
+        renderPeers();
+        break;
+      case "peer-left": {
+        const who = state.names[msg.peerId] || "Dalyvis";
+        playBeep("leave");
+        toast(`${who} išėjo`);
+        closePeer(msg.peerId);
+        renderPeers();
+        break;
+      }
+      case "name":
+        state.names[msg.from] = msg.name;
+        if (!state.greeted.has(msg.from)) {
+          state.greeted.add(msg.from);
+          toast(`${msg.name} prisijungė`);
+        }
+        renderPeers();
+        break;
+      case "offer": await handleOffer(msg); break;
+      case "answer": await state.pcs[msg.from]?.setRemoteDescription(msg.sdp); break;
+      case "ice": try { await state.pcs[msg.from]?.addIceCandidate(msg.candidate); } catch {} break;
+      case "error": toast("Klaida: " + msg.reason); break;
+    }
+  };
+}
+
+function send(obj) {
+  if (state.ws?.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify(obj));
+}
+
+async function createPeer(peerId, isInitiator) {
+  if (state.pcs[peerId]) return state.pcs[peerId];
+  const pc = new RTCPeerConnection({ iceServers: state.iceServers });
+  state.pcs[peerId] = pc;
+
+  state.localStream.getTracks().forEach((t) => pc.addTrack(t, state.localStream));
+  pc.onicecandidate = (e) => { if (e.candidate) send({ type: "ice", to: peerId, candidate: e.candidate }); };
+  pc.ontrack = (e) => setupPeerAudio(peerId, e.streams[0]);
+
+  if (isInitiator) {
+    setupDataChannel(peerId, pc.createDataChannel("chat"));
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    send({ type: "offer", to: peerId, sdp: offer });
+    send({ type: "name", to: peerId, name: state.myName });
+  } else {
+    pc.ondatachannel = (e) => setupDataChannel(peerId, e.channel);
+  }
+  return pc;
+}
+
+// Chatas keliauja TIESIAI tarp narsykliu (DataChannel, sifruota) - serveris nemato.
+function setupDataChannel(peerId, channel) {
+  state.channels[peerId] = channel;
+  channel.onmessage = (e) => {
+    try {
+      const m = JSON.parse(e.data);
+      if (m.type === "chat") addChatMessage(m.name, m.text, false);
+    } catch {}
+  };
+}
+
+function sendChat(text) {
+  text = text.trim();
+  if (!text) return;
+  const payload = JSON.stringify({ type: "chat", name: state.myName, text });
+  for (const ch of Object.values(state.channels)) {
+    if (ch.readyState === "open") ch.send(payload);
+  }
+  addChatMessage(state.myName, text, true);
+}
+
+async function handleOffer(msg) {
+  const pc = await createPeer(msg.from, false);
+  await pc.setRemoteDescription(msg.sdp);
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  send({ type: "answer", to: msg.from, sdp: answer });
+  send({ type: "name", to: msg.from, name: state.myName });
+}
+
+function closePeer(peerId) {
+  state.pcs[peerId]?.close();
+  state.channels[peerId]?.close?.();
+  state.audioCtxs[peerId]?.close().catch(() => {});
+  delete state.pcs[peerId];
+  delete state.names[peerId];
+  delete state.gains[peerId];
+  delete state.audioCtxs[peerId];
+  delete state.volumes[peerId];
+  delete state.channels[peerId];
+  delete state.quality[peerId];
+  delete state.prevStats[peerId];
+  state.greeted.delete(peerId);
+  document.getElementById("audio-" + peerId)?.remove();
+}
+
+// Garso grandine: srautas -> GainNode (lokalus garsumas) -> garsiakalbiai.
+// Per Web Audio galime virsyti 100% (audio.volume to neleidzia).
+// Pasleptas audio elementas reikalingas, kad narsykle paleistu WebRTC srauta.
+function setupPeerAudio(peerId, stream) {
+  let audio = document.getElementById("audio-" + peerId);
+  if (!audio) {
+    audio = document.createElement("audio");
+    audio.id = "audio-" + peerId; audio.autoplay = true; audio.playsInline = true;
+    document.body.appendChild(audio);
+  }
+  audio.srcObject = stream;
+
+  try {
+    const ctx = state.audioCtxs[peerId] || new (window.AudioContext || window.webkitAudioContext)();
+    state.audioCtxs[peerId] = ctx;
+    if (ctx.state === "suspended") { ctx.resume().then(refreshAudioUnlock).catch(() => {}); }
+    refreshAudioUnlock();
+    audio.muted = true; // garsa girdime per GainNode, ne per elementa (kad nesidubliuotu)
+
+    const source = ctx.createMediaStreamSource(stream);
+    const gain = ctx.createGain();
+    gain.gain.value = state.volumes[peerId] ?? 1;
+    state.gains[peerId] = gain;
+
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+
+    source.connect(gain).connect(ctx.destination);
+    source.connect(analyser);
+    runSpeakingDetector(peerId, analyser);
+  } catch {
+    // Atsarginis variantas: jei Web Audio neveikia, leidziame tiesiai (max 100%)
+    audio.muted = false;
+    audio.volume = Math.min(1, state.volumes[peerId] ?? 1);
+  }
+}
+
+// Garso atrakinimas: narsykles blokuoja auto-paleidima, kol nera naudotojo gesto.
+// Jei AudioContext "suspended", parodome banneri; bet koks paspaudimas ji atrakina.
+function refreshAudioUnlock() {
+  const ctxs = Object.values(state.audioCtxs);
+  const blocked = ctxs.some((c) => c.state === "suspended");
+  $("audioUnlock").classList.toggle("hidden", !blocked);
+}
+
+async function resumeAllAudio() {
+  for (const ctx of Object.values(state.audioCtxs)) {
+    if (ctx.state === "suspended") { try { await ctx.resume(); } catch {} }
+  }
+  if (state.uiCtx?.state === "suspended") { try { await state.uiCtx.resume(); } catch {} }
+  refreshAudioUnlock();
+}
+
+// Trumpas garselis (be isoriniu failu): join = kylantis, leave = krintantis.
+function playBeep(kind) {
+  try {
+    if (!state.uiCtx) state.uiCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = state.uiCtx;
+    if (ctx.state === "suspended") ctx.resume();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    const freqs = kind === "join" ? [523, 784] : [784, 392];
+    osc.frequency.setValueAtTime(freqs[0], now);
+    osc.frequency.setValueAtTime(freqs[1], now + 0.11);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.16, now + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+    osc.start(now); osc.stop(now + 0.32);
+  } catch {}
+}
+
+["pointerdown", "touchstart", "keydown"].forEach((ev) =>
+  document.addEventListener(ev, resumeAllAudio, { passive: true })
+);
+$("audioUnlock").addEventListener("click", resumeAllAudio);
+
+function runSpeakingDetector(peerId, analyser) {
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  (function loop() {
+    if (!state.pcs[peerId]) return;
+    analyser.getByteFrequencyData(data);
+    const vol = data.reduce((a, b) => a + b, 0) / data.length;
+    $("bento")?.querySelector("#tile-" + peerId)?.classList.toggle("speaking", vol > 12);
+    requestAnimationFrame(loop);
+  })();
+}
+
+// ---------- Rysio kokybe ----------
+// Periodiskai skaitome WebRTC statistika: packet loss + RTT -> spalvotas taskelis.
+async function pollQuality() {
+  for (const [peerId, pc] of Object.entries(state.pcs)) {
+    try {
+      const stats = await pc.getStats();
+      let rtt = null, lost = 0, recv = 0;
+      stats.forEach((r) => {
+        if (r.type === "inbound-rtp" && r.kind === "audio") {
+          lost = r.packetsLost ?? 0;
+          recv = r.packetsReceived ?? 0;
+        }
+        if (r.type === "candidate-pair" && r.nominated && r.currentRoundTripTime != null) {
+          rtt = r.currentRoundTripTime;
+        }
+      });
+      const prev = state.prevStats[peerId] || { lost: 0, recv: 0 };
+      const dLost = Math.max(0, lost - prev.lost);
+      const dRecv = Math.max(0, recv - prev.recv);
+      state.prevStats[peerId] = { lost, recv };
+      const lossRatio = dLost + dRecv > 0 ? dLost / (dLost + dRecv) : 0;
+      setQuality(peerId, qualityLevel(rtt, lossRatio));
+    } catch {}
+  }
+}
+
+function qualityLevel(rtt, loss) {
+  if (loss > 0.08 || (rtt != null && rtt > 0.4)) return "bad";
+  if (loss > 0.02 || (rtt != null && rtt > 0.2)) return "ok";
+  return "good";
+}
+
+function setQuality(peerId, level) {
+  if (state.quality[peerId] === level) return;
+  state.quality[peerId] = level;
+  const dot = $("bento")?.querySelector("#tile-" + peerId + " .qdot");
+  if (dot) dot.className = "qdot " + level;
+}
+
+// Pakeicia, kaip garsiai SIS naudotojas girdi konkretu dalyvi (lokaliai).
+function setVolume(peerId, v) {
+  state.volumes[peerId] = v;
+  if (state.gains[peerId]) {
+    state.gains[peerId].gain.value = v;
+  } else {
+    const a = document.getElementById("audio-" + peerId);
+    if (a) a.volume = Math.min(1, v);
+  }
+}
+
+// ---------- Atvaizdavimas ----------
+function renderPeers() {
+  const bento = $("bento");
+  bento.innerHTML = "";
+  bento.appendChild(tileEl(state.myId || "me", state.myName + " (tu)", true));
+  for (const pid of Object.keys(state.pcs)) {
+    bento.appendChild(tileEl(pid, state.names[pid] || "Dalyvis", false));
+  }
+  const n = 1 + Object.keys(state.pcs).length;
+  $("peerCount").textContent = n === 1 ? "1 dalyvis" : `${n} dalyviai`;
+}
+
+function tileEl(id, name, isMe) {
+  const div = document.createElement("div");
+  div.className = "glass tile" + (isMe ? " me" : "");
+  div.id = "tile-" + id;
+  const mic = isMe && state.muted
+    ? '<span class="mic off">🔇</span>'
+    : '<span class="mic">🎤</span>';
+  const qdot = isMe ? "" : `<span class="qdot ${state.quality[id] || ''}" title="Ryšio kokybė"></span>`;
+  const pctVal = Math.round((state.volumes[id] ?? 1) * 100);
+  const volRow = isMe ? "" : `
+    <div class="vol">
+      <span class="vol-ico">🔈</span>
+      <input type="range" class="vol-slider" min="0" max="200" step="5" value="${pctVal}"
+             aria-label="Garsumas" />
+      <span class="vol-pct">${pctVal}%</span>
+    </div>`;
+  div.innerHTML = `
+    ${mic}
+    ${qdot}
+    <div class="avatar">${initials(name)}</div>
+    <div class="pname">${escapeHtml(name)}</div>
+    <div class="prole">${isMe ? (state.isHost ? "Šeimininkas" : "Tu") : "Prisijungęs"}</div>
+    ${volRow}
+  `;
+  if (!isMe) {
+    const slider = div.querySelector(".vol-slider");
+    const pct = div.querySelector(".vol-pct");
+    slider.addEventListener("input", () => {
+      setVolume(id, slider.value / 100);
+      pct.textContent = slider.value + "%";
+    });
+  }
+  return div;
+}
+
+// ---------- Valdikliai ----------
+$("muteBtn").addEventListener("click", () => {
+  state.muted = !state.muted;
+  state.localStream.getAudioTracks().forEach((t) => (t.enabled = !state.muted));
+  const btn = $("muteBtn");
+  btn.textContent = state.muted ? "🔇 Įjungti mikrofoną" : "🎤 Mikrofonas";
+  btn.className = state.muted ? "ctl ctl-mic-off" : "ctl ctl-mic-on glass";
+  renderPeers();
+});
+
+$("leaveBtn").addEventListener("click", () => location.reload());
+
+// ---------- Chatas ----------
+function addChatMessage(name, text, mine) {
+  const wrap = document.createElement("div");
+  wrap.className = "msg" + (mine ? " mine" : "");
+  wrap.innerHTML = `<div class="msg-name">${escapeHtml(name)}</div><div class="msg-text">${escapeHtml(text)}</div>`;
+  const list = $("chatMsgs");
+  list.appendChild(wrap);
+  list.scrollTop = list.scrollHeight;
+  if (!mine && !state.chatOpen) { state.unread++; updateChatBadge(); }
+}
+
+function updateChatBadge() {
+  const badge = $("chatBadge");
+  badge.textContent = state.unread;
+  badge.classList.toggle("hidden", state.unread === 0);
+}
+
+function toggleChat(open) {
+  state.chatOpen = open ?? !state.chatOpen;
+  $("chatPanel").classList.toggle("hidden", !state.chatOpen);
+  if (state.chatOpen) { state.unread = 0; updateChatBadge(); $("chatText").focus(); }
+}
+
+$("chatBtn").addEventListener("click", () => toggleChat());
+$("chatClose").addEventListener("click", () => toggleChat(false));
+$("chatForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  sendChat($("chatText").value);
+  $("chatText").value = "";
+});
+
+$("codeTile").addEventListener("click", async () => {
+  const link = `${location.origin}/?room=${state.code}`;
+  try {
+    if (navigator.share) { await navigator.share({ title: "Voice Chat", text: "Prisijunk prie pokalbio:", url: link }); return; }
+    await navigator.clipboard.writeText(link);
+    toast("Kvietimo nuoroda nukopijuota!");
+  } catch { toast("Kodas: " + state.code); }
+});
+</script>
+</body>
+</html>

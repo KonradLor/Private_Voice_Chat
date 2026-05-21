@@ -1,0 +1,10 @@
+.git
+.gitignore
+.env
+*.md
+design.jpg
+__pycache__/
+*.pyc
+.venv/
+venv/
+Caddyfile.example
