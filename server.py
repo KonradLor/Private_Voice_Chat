@@ -248,7 +248,7 @@ async def signaling(ws: WebSocket, code: str) -> None:
     if is_host:
         room.host_id = peer_id
 
-    existing = [{"peerId": pid, "user": room.meta.get(pid, {}).get("user")} for pid in room.peers]
+    existing = list(room.peers.keys())   # ID tekstų sąrašas (frontend createPeer tikisi string)
     room.peers[peer_id] = ws
     room.meta[peer_id] = {"user": sess["user"], "is_admin": sess["is_admin"]}
 
