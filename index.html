@@ -131,6 +131,13 @@
   .tile.speaking .avatar { box-shadow: 0 0 0 4px rgba(74,222,128,.4); }
   .tile .pname { font-weight: 640; font-size: 15.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tile .prole { font-size: 12px; color: var(--muted); }
+  .tile .kick-btn {
+    margin-top: 8px; padding: 5px 12px; border-radius: 8px; cursor: pointer;
+    font-size: 12px; font-weight: 600; color: #fca5a5;
+    background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.3);
+    transition: background .15s;
+  }
+  .tile .kick-btn:hover { background: rgba(239,68,68,.25); color: #fff; }
   .tile .mic { position: absolute; top: 14px; right: 14px; font-size: 16px; opacity: .7; }
   .tile .mic.off { color: var(--red); opacity: 1; }
   .tile .vol { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 4px; }
@@ -317,7 +324,7 @@
 const $ = (id) => document.getElementById(id);
 const state = {
   ws: null, pcs: {}, localStream: null,
-  myId: null, isHost: false, myName: "",
+  myId: null, isHost: false, myName: "", isAdmin: false,
   names: {}, muted: false, code: null,
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
   gains: {},     // peerId -> Web Audio GainNode (lokalus garsumas)
@@ -355,13 +362,25 @@ async function loadIceServers() {
   } catch { /* liekam su numatytu STUN */ }
 }
 
+// ---------- Auth gate (centrinis kondev SSO) ----------
+// Reikalauja prisijungimo. Vardas imamas iš kondev paskyros (ne rankinis).
+(async function authGate() {
+  try {
+    const r = await fetch("/api/me");
+    const d = await r.json();
+    if (!d.authenticated) { window.location.href = "/auth/login"; return; }
+    state.myName = d.user || "Vartotojas";
+    state.isAdmin = !!d.is_admin;
+    const jn = document.getElementById("joinName");
+    if (jn) { jn.value = state.myName; jn.readOnly = true; }
+  } catch { window.location.href = "/auth/login"; }
+})();
+
 // ---------- Lobby ----------
 $("lobby").classList.remove("hidden");
 
 $("createBtn").addEventListener("click", async () => {
-  const name = (prompt("Koks tavo vardas?", "Adminas") || "").trim();
-  if (!name) return;
-  state.myName = name;
+  if (!state.myName) { window.location.href = "/auth/login"; return; }
   $("lobbyError").textContent = "";
   try {
     const res = await fetch("/api/rooms", { method: "POST" });
@@ -419,6 +438,7 @@ function connectSignaling(code) {
       case "welcome":
         state.myId = msg.peerId;
         state.isHost = msg.isHost;
+        state.isAdmin = !!msg.isAdmin;
         state.names[msg.peerId] = state.myName;
         // Jau esancius dalyvius zymime "pasveikintais" - jiems pranesimu nerodome.
         msg.peers.forEach((pid) => state.greeted.add(pid));
@@ -448,7 +468,15 @@ function connectSignaling(code) {
       case "offer": await handleOffer(msg); break;
       case "answer": await state.pcs[msg.from]?.setRemoteDescription(msg.sdp); break;
       case "ice": try { await state.pcs[msg.from]?.addIceCandidate(msg.candidate); } catch {} break;
-      case "error": toast("Klaida: " + msg.reason); break;
+      case "kicked":
+        try { state.ws.close(); } catch {}
+        alert("Administratorius (" + (msg.by || "admin") + ") išmetė tave iš kambario. Gali prisijungti iš naujo.");
+        window.location.href = "/";
+        break;
+      case "error":
+        if (msg.reason === "unauthorized") { window.location.href = "/auth/login"; break; }
+        toast("Klaida: " + msg.reason);
+        break;
     }
   };
 }
@@ -691,6 +719,10 @@ function tileEl(id, name, isMe) {
              aria-label="Garsumas" />
       <span class="vol-pct">${pctVal}%</span>
     </div>`;
+  // Admin gali išmesti narį (be bano - gali grįžti)
+  const kickBtn = (!isMe && state.isAdmin)
+    ? `<button class="kick-btn" title="Išmesti iš kambario" data-kick="${id}">⨉ Išmesti</button>`
+    : "";
   div.innerHTML = `
     ${mic}
     ${qdot}
@@ -698,6 +730,7 @@ function tileEl(id, name, isMe) {
     <div class="pname">${escapeHtml(name)}</div>
     <div class="prole">${isMe ? (state.isHost ? "Šeimininkas" : "Tu") : "Prisijungęs"}</div>
     ${volRow}
+    ${kickBtn}
   `;
   if (!isMe) {
     const slider = div.querySelector(".vol-slider");
@@ -705,6 +738,12 @@ function tileEl(id, name, isMe) {
     slider.addEventListener("input", () => {
       setVolume(id, slider.value / 100);
       pct.textContent = slider.value + "%";
+    });
+    const kb = div.querySelector(".kick-btn");
+    if (kb) kb.addEventListener("click", () => {
+      if (confirm(`Išmesti „${name}" iš kambario? (galės prisijungti iš naujo)`)) {
+        send({ type: "kick", to: id });
+      }
     });
   }
   return div;
