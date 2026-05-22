@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Body, Cookie, Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 app = FastAPI(title="Voice Chat")
@@ -43,16 +43,21 @@ OIDC_USERINFO_URL = os.environ.get("OIDC_USERINFO_URL", "").strip()
 OIDC_REDIRECT_URI = os.environ.get("OIDC_REDIRECT_URI", "").strip()
 OIDC_ADMIN_GROUP = os.environ.get("OIDC_ADMIN_GROUP", "authentik Admins").strip()
 
+# Vidinis service-to-service tokenas (dashboard -> voice). Naudojamas /internal/*
+# (pvz. vartotojo deaktyvavimo propagavimui iš centrinės admin panelės).
+INTERNAL_API_TOKEN = os.environ.get("INTERNAL_API_TOKEN", "").strip()
+
 SESSION_COOKIE = "voice_session"
 SESSION_TTL_DAYS = 7
-# token -> {"user": str, "is_admin": bool, "expires": datetime}
+# token -> {"user": str, "username": str, "is_admin": bool, "expires": datetime}
 SESSIONS: dict[str, dict] = {}
 
 
-def _new_session(user: str, is_admin: bool) -> str:
+def _new_session(user: str, is_admin: bool, username: str = "") -> str:
     token = secrets.token_urlsafe(32)
     SESSIONS[token] = {
-        "user": user,
+        "user": user,           # rodomas vardas
+        "username": username,   # Authentik preferred_username (stabilus identifikatorius)
         "is_admin": is_admin,
         "expires": datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS),
     }
@@ -160,9 +165,10 @@ def auth_callback(code: str = "", state: str = "",
         raise HTTPException(status_code=502, detail="OIDC serveris nepasiekiamas")
 
     user = info.get("name") or info.get("preferred_username") or info.get("email") or "user"
+    username = info.get("preferred_username") or info.get("email") or user
     groups = info.get("groups", []) or []
     is_admin = OIDC_ADMIN_GROUP in groups
-    token = _new_session(user, is_admin)
+    token = _new_session(user, is_admin, username)
     resp = RedirectResponse(url="/", status_code=302)
     resp.set_cookie(SESSION_COOKIE, token, httponly=True, secure=True,
                     samesite="lax", max_age=SESSION_TTL_DAYS * 24 * 3600, path="/")
@@ -185,6 +191,51 @@ def api_me(voice_session: str | None = Cookie(default=None)):
     if not info:
         return {"authenticated": False, "user": None, "is_admin": False}
     return {"authenticated": True, "user": info["user"], "is_admin": info["is_admin"]}
+
+
+# ============================================
+# Vidinis API (service-to-service, NE vartotojams)
+# ============================================
+# Apsauga: bendras X-Internal-Token (ne vartotojo sesija). Pasiekiama tik per
+# vidinį "web" docker tinklą (Caddy /internal/* viešai neatveria).
+@app.post("/internal/set-active")
+async def internal_set_active(
+    payload: dict = Body(...),
+    x_internal_token: str | None = Header(default=None),
+):
+    """Centrinė admin panelė kviečia, kai vartotojas deaktyvuojamas/aktyvuojamas.
+    Voice neturi nuolatinės DB - tad deaktyvuojant tiesiog išmetame jo sesijas ir
+    atjungiame aktyvius pokalbius (naują prisijungimą vis tiek blokuoja Authentik)."""
+    if not INTERNAL_API_TOKEN:
+        raise HTTPException(status_code=503, detail="vidiniai endpoint'ai išjungti")
+    if x_internal_token != INTERNAL_API_TOKEN:
+        raise HTTPException(status_code=401, detail="neteisingas vidinis tokenas")
+
+    username = (payload.get("username") or "").strip()
+    is_active = bool(payload.get("is_active"))
+    if is_active or not username:
+        # Aktyvuojant nieko daryti nereikia (naujas login leidžiamas per Authentik).
+        return {"ok": True, "dropped_sessions": 0, "closed_peers": 0}
+
+    # 1) Išmetam visas to vartotojo sesijas (pagal username)
+    dropped = [t for t, s in SESSIONS.items() if s.get("username") == username]
+    for t in dropped:
+        SESSIONS.pop(t, None)
+
+    # 2) Atjungiam aktyvius WS pokalbius (jei tuo metu kalbasi)
+    closed = 0
+    for room in list(rooms.values()):
+        for pid, meta in list(room.meta.items()):
+            if meta.get("username") == username:
+                ws = room.peers.get(pid)
+                if ws is not None:
+                    try:
+                        await ws.send_json({"type": "kicked", "by": "sistema"})
+                        await ws.close()
+                    except Exception:
+                        pass
+                    closed += 1
+    return {"ok": True, "dropped_sessions": len(dropped), "closed_peers": closed}
 
 
 # ============================================
@@ -250,7 +301,8 @@ async def signaling(ws: WebSocket, code: str) -> None:
 
     existing = list(room.peers.keys())   # ID tekstų sąrašas (frontend createPeer tikisi string)
     room.peers[peer_id] = ws
-    room.meta[peer_id] = {"user": sess["user"], "is_admin": sess["is_admin"]}
+    room.meta[peer_id] = {"user": sess["user"], "username": sess.get("username", ""),
+                          "is_admin": sess["is_admin"]}
 
     await ws.send_json({
         "type": "welcome",
