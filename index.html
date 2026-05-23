@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
 <meta name="theme-color" content="#0a0c18" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
-<title>Voice Chat</title>
+<title>Video &amp; Audio Chat</title>
 <style>
   :root {
     --bg-0: #070912;
@@ -279,10 +279,10 @@
   <!-- LOBBY -->
   <div class="glass hidden" id="lobby">
     <div class="brand">
-      <div class="mark">🎙️</div>
-      <h1>Voice Chat</h1>
+      <div class="mark">🎥</div>
+      <h1>Video &amp; Audio Chat</h1>
     </div>
-    <p class="lead">Privatūs balso pokalbiai su draugais. Garsas keliauja tiesiogiai tarp jūsų ir yra šifruojamas — serveris jo nemato.</p>
+    <p class="lead">Privatūs vaizdo ir balso pokalbiai su draugais. Garsas ir vaizdas keliauja tiesiogiai tarp jūsų ir yra šifruojami — serveris jų nemato.</p>
 
     <button class="btn btn-primary" id="createBtn">＋ Sukurti naują kambarį</button>
 
@@ -940,7 +940,7 @@ $("chatForm").addEventListener("submit", (e) => {
 $("codeTile").addEventListener("click", async () => {
   const link = `${location.origin}/?room=${state.code}`;
   try {
-    if (navigator.share) { await navigator.share({ title: "Voice Chat", text: "Prisijunk prie pokalbio:", url: link }); return; }
+    if (navigator.share) { await navigator.share({ title: "Video & Audio Chat", text: "Prisijunk prie pokalbio:", url: link }); return; }
     await navigator.clipboard.writeText(link);
     toast("Kvietimo nuoroda nukopijuota!");
   } catch { toast("Kodas: " + state.code); }
