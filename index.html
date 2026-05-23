@@ -157,11 +157,29 @@
     background: var(--accent); cursor: pointer;
   }
 
+  /* Video plytele */
+  .tile.has-video { padding: 0; overflow: hidden; justify-content: flex-end; }
+  .tile-video {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; background: #05060c; border-radius: inherit;
+  }
+  .tile.me .tile-video { transform: scaleX(-1); } /* veidrodinis selfie vaizdas */
+  .tile.has-video .qdot, .tile.has-video .mic { z-index: 3; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+  .tile-overlay {
+    position: relative; z-index: 2; width: 100%;
+    display: flex; flex-direction: column; gap: 7px; padding: 24px 12px 11px;
+    background: linear-gradient(to top, rgba(0,0,0,.78), transparent);
+  }
+  .tile-overlay .pname { font-weight: 650; font-size: 14px; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+  .tile-overlay .vol { margin-top: 0; }
+
   /* Valdikliai */
   .controls { display: flex; gap: 14px; padding: 14px; }
   .controls .ctl { flex: 1; padding: 17px; border-radius: 18px; font-size: 15px; font-weight: 650; color: white; display: flex; align-items: center; justify-content: center; gap: 9px; }
   .ctl-mic-on { background: var(--glass-strong); border: 1px solid var(--glass-border); }
   .ctl-mic-off { background: var(--red); }
+  .ctl-cam-off { background: var(--glass-strong); border: 1px solid var(--glass-border); }
+  .ctl-cam-on { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
   .ctl-leave { background: rgba(251,113,133,.16); border: 1px solid rgba(251,113,133,.4); color: var(--red); flex: 0 0 auto; min-width: 120px; }
 
   .toast {
@@ -238,9 +256,9 @@
     .tile { padding: 14px; gap: 9px; }
     .tile .avatar { width: 52px; height: 52px; font-size: 20px; }
     .tile .pname { font-size: 14px; }
-    .controls { gap: 10px; padding: 12px; position: sticky; bottom: 0; }
-    .controls .ctl { padding: 16px; font-size: 14.5px; }
-    .ctl-leave { min-width: 96px; }
+    .controls { gap: 9px; padding: 12px; position: sticky; bottom: 0; flex-wrap: wrap; }
+    .controls .ctl { padding: 15px 10px; font-size: 13.5px; flex: 1 1 calc(50% - 5px); min-width: 0; white-space: nowrap; }
+    .ctl-leave { flex: 1 1 calc(50% - 5px); min-width: 0; }
     .brand h1 { font-size: 22px; }
   }
   @media (max-width: 360px) {
@@ -297,6 +315,7 @@
 
     <div class="controls">
       <button class="ctl ctl-mic-on glass" id="muteBtn">🎤 Mikrofonas</button>
+      <button class="ctl ctl-cam-off glass" id="camBtn">📷 Kamera</button>
       <button class="ctl ctl-chat glass" id="chatBtn">💬 Pokalbis<span class="chat-badge hidden" id="chatBadge">0</span></button>
       <button class="ctl ctl-leave" id="leaveBtn">⏻ Išeiti</button>
     </div>
@@ -337,6 +356,13 @@ const state = {
   unread: 0,
   chatOpen: false,
   uiCtx: null,   // AudioContext UI garseliams (join/leave)
+  // --- Video (pasirenkama kamera) ---
+  cameraOn: false,
+  videoTrack: null,        // mano siunciamas video takelis
+  localVideoStream: null,  // mano kameros srautas (perziurai)
+  videoSenders: {},        // peerId -> RTCRtpSender (video) replaceTrack'ui be renegotiation
+  remoteStreams: {},       // peerId -> nutolusio dalyvio MediaStream (su video)
+  hasVideo: {},            // peerId -> ar dalyvis siuncia video (rodyti vaizda ar avatara)
 };
 
 function toast(msg) {
@@ -465,9 +491,12 @@ function connectSignaling(code) {
         }
         renderPeers();
         break;
-      case "offer": await handleOffer(msg); break;
-      case "answer": await state.pcs[msg.from]?.setRemoteDescription(msg.sdp); break;
-      case "ice": try { await state.pcs[msg.from]?.addIceCandidate(msg.candidate); } catch {} break;
+      case "description": await handleDescription(msg.from, msg.description); break;
+      case "ice": {
+        const pc = state.pcs[msg.from];
+        if (pc) { try { await pc.addIceCandidate(msg.candidate); } catch (e) { if (!pc._ignoreOffer) console.error(e); } }
+        break;
+      }
       case "kicked":
         try { state.ws.close(); } catch {}
         alert("Administratorius (" + (msg.by || "admin") + ") išmetė tave iš kambario. Gali prisijungti iš naujo.");
@@ -489,21 +518,54 @@ async function createPeer(peerId, isInitiator) {
   if (state.pcs[peerId]) return state.pcs[peerId];
   const pc = new RTCPeerConnection({ iceServers: state.iceServers });
   state.pcs[peerId] = pc;
+  // Perfect negotiation: vienas is poros yra "mandagus" (deterministiskai pagal ID).
+  pc._polite = state.myId < peerId;
+  pc._makingOffer = false;
+  pc._ignoreOffer = false;
 
-  state.localStream.getTracks().forEach((t) => pc.addTrack(t, state.localStream));
+  // Garsas - visada. Video - tik jei kamera jau ijungta.
+  pc.addTrack(state.localStream.getAudioTracks()[0], state.localStream);
+  if (state.cameraOn && state.videoTrack) {
+    state.videoSenders[peerId] = pc.addTrack(state.videoTrack, state.localStream);
+  }
+
+  pc.onnegotiationneeded = async () => {
+    try {
+      pc._makingOffer = true;
+      const offer = await pc.createOffer();
+      if (pc.signalingState !== "stable") return;
+      await pc.setLocalDescription(offer);
+      send({ type: "description", to: peerId, description: pc.localDescription });
+    } catch (e) { console.error("negotiation", e); }
+    finally { pc._makingOffer = false; }
+  };
   pc.onicecandidate = (e) => { if (e.candidate) send({ type: "ice", to: peerId, candidate: e.candidate }); };
-  pc.ontrack = (e) => setupPeerAudio(peerId, e.streams[0]);
+  pc.ontrack = (e) => onRemoteTrack(peerId, e);
 
   if (isInitiator) {
     setupDataChannel(peerId, pc.createDataChannel("chat"));
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    send({ type: "offer", to: peerId, sdp: offer });
-    send({ type: "name", to: peerId, name: state.myName });
   } else {
     pc.ondatachannel = (e) => setupDataChannel(peerId, e.channel);
   }
+  send({ type: "name", to: peerId, name: state.myName });
   return pc;
+}
+
+// Nutolusio dalyvio takelis: garsa tvarkome per Web Audio, video rodome plyteleje.
+function onRemoteTrack(peerId, e) {
+  const stream = e.streams[0];
+  if (e.track.kind === "audio") {
+    setupPeerAudio(peerId, stream);
+  } else if (e.track.kind === "video") {
+    state.remoteStreams[peerId] = stream;
+    const track = e.track;
+    const update = () => { state.hasVideo[peerId] = !track.muted; renderPeers(); };
+    track.onmute = update;
+    track.onunmute = update;
+    track.onended = () => { state.hasVideo[peerId] = false; renderPeers(); };
+    state.hasVideo[peerId] = !track.muted;
+    renderPeers();
+  }
 }
 
 // Chatas keliauja TIESIAI tarp narsykliu (DataChannel, sifruota) - serveris nemato.
@@ -527,13 +589,23 @@ function sendChat(text) {
   addChatMessage(state.myName, text, true);
 }
 
-async function handleOffer(msg) {
-  const pc = await createPeer(msg.from, false);
-  await pc.setRemoteDescription(msg.sdp);
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-  send({ type: "answer", to: msg.from, sdp: answer });
-  send({ type: "name", to: msg.from, name: state.myName });
+// Perfect negotiation: tvarko ir pradini sujungima, ir renegotiation
+// (pvz. kai dalyvis vidury pokalbio ijungia kamera).
+async function handleDescription(peerId, description) {
+  let pc = state.pcs[peerId];
+  if (!pc) pc = await createPeer(peerId, false); // esamas dalyvis gauna pirma offer
+
+  const offerCollision = description.type === "offer" &&
+      (pc._makingOffer || pc.signalingState !== "stable");
+  pc._ignoreOffer = !pc._polite && offerCollision;
+  if (pc._ignoreOffer) return; // nemandagus ignoruoja susidurima
+
+  await pc.setRemoteDescription(description);
+  if (description.type === "offer") {
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    send({ type: "description", to: peerId, description: pc.localDescription });
+  }
 }
 
 function closePeer(peerId) {
@@ -548,6 +620,9 @@ function closePeer(peerId) {
   delete state.channels[peerId];
   delete state.quality[peerId];
   delete state.prevStats[peerId];
+  delete state.videoSenders[peerId];
+  delete state.remoteStreams[peerId];
+  delete state.hasVideo[peerId];
   state.greeted.delete(peerId);
   document.getElementById("audio-" + peerId)?.remove();
 }
@@ -705,8 +780,12 @@ function renderPeers() {
 
 function tileEl(id, name, isMe) {
   const div = document.createElement("div");
-  div.className = "glass tile" + (isMe ? " me" : "");
+  const showVideo = isMe
+    ? (state.cameraOn && !!state.localVideoStream)
+    : (state.hasVideo[id] && !!state.remoteStreams[id]);
+  div.className = "glass tile" + (isMe ? " me" : "") + (showVideo ? " has-video" : "");
   div.id = "tile-" + id;
+
   const mic = isMe && state.muted
     ? '<span class="mic off">🔇</span>'
     : '<span class="mic">🎤</span>';
@@ -721,21 +800,38 @@ function tileEl(id, name, isMe) {
     </div>`;
   // Admin gali išmesti narį (be bano - gali grįžti)
   const kickBtn = (!isMe && state.isAdmin)
-    ? `<button class="kick-btn" title="Išmesti iš kambario" data-kick="${id}">⨉ Išmesti</button>`
+    ? `<button class="kick-btn" title="Išmesti iš kambario">⨉ Išmesti</button>`
     : "";
-  div.innerHTML = `
-    ${mic}
-    ${qdot}
-    <div class="avatar">${initials(name)}</div>
-    <div class="pname">${escapeHtml(name)}</div>
-    <div class="prole">${isMe ? (state.isHost ? "Šeimininkas" : "Tu") : "Prisijungęs"}</div>
-    ${volRow}
-    ${kickBtn}
-  `;
+  const role = isMe ? (state.isHost ? "Šeimininkas" : "Tu") : "Prisijungęs";
+
+  if (showVideo) {
+    // Video plytele: vaizdas fone, info apatineje juostoje.
+    div.innerHTML = `
+      <video class="tile-video" autoplay playsinline muted></video>
+      ${mic}
+      ${qdot}
+      <div class="tile-overlay">
+        <div class="pname">${escapeHtml(name)}</div>
+        ${volRow}
+        ${kickBtn}
+      </div>`;
+    const v = div.querySelector(".tile-video");
+    v.srcObject = isMe ? state.localVideoStream : state.remoteStreams[id];
+  } else {
+    div.innerHTML = `
+      ${mic}
+      ${qdot}
+      <div class="avatar">${initials(name)}</div>
+      <div class="pname">${escapeHtml(name)}</div>
+      <div class="prole">${role}</div>
+      ${volRow}
+      ${kickBtn}`;
+  }
+
   if (!isMe) {
     const slider = div.querySelector(".vol-slider");
     const pct = div.querySelector(".vol-pct");
-    slider.addEventListener("input", () => {
+    if (slider) slider.addEventListener("input", () => {
       setVolume(id, slider.value / 100);
       pct.textContent = slider.value + "%";
     });
@@ -758,6 +854,55 @@ $("muteBtn").addEventListener("click", () => {
   btn.className = state.muted ? "ctl ctl-mic-off" : "ctl ctl-mic-on glass";
   renderPeers();
 });
+
+// ---------- Kamera (pasirenkama, kiekvienas pats sprendzia) ----------
+$("camBtn").addEventListener("click", () => state.cameraOn ? cameraOff() : cameraOn());
+
+async function cameraOn() {
+  try {
+    const vstream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } },
+      audio: false,
+    });
+    state.videoTrack = vstream.getVideoTracks()[0];
+    state.localVideoStream = vstream;
+    state.cameraOn = true;
+    // Jei naudotojas isjungia kamera per OS/irengini - sutvarkom UI
+    state.videoTrack.onended = () => cameraOff();
+    // Pridedame video takeli i visus pokalbius
+    for (const [pid, pc] of Object.entries(state.pcs)) {
+      if (state.videoSenders[pid]) {
+        await state.videoSenders[pid].replaceTrack(state.videoTrack); // be renegotiation
+      } else {
+        state.videoSenders[pid] = pc.addTrack(state.videoTrack, state.localStream); // sukels renegotiation
+      }
+    }
+  } catch {
+    toast("Nepavyko įjungti kameros.");
+    return;
+  }
+  updateCameraBtn();
+  renderPeers();
+}
+
+function cameraOff() {
+  state.cameraOn = false;
+  // replaceTrack(null) sustabdo siuntima BE renegotiation - senderiai lieka pakartotiniam ijungimui
+  for (const sender of Object.values(state.videoSenders)) {
+    try { sender.replaceTrack(null); } catch {}
+  }
+  state.localVideoStream?.getTracks().forEach((t) => t.stop());
+  state.videoTrack = null;
+  state.localVideoStream = null;
+  updateCameraBtn();
+  renderPeers();
+}
+
+function updateCameraBtn() {
+  const b = $("camBtn");
+  b.textContent = state.cameraOn ? "📹 Kamera" : "📷 Kamera";
+  b.className = state.cameraOn ? "ctl ctl-cam-on" : "ctl ctl-cam-off glass";
+}
 
 $("leaveBtn").addEventListener("click", () => location.reload());
 
