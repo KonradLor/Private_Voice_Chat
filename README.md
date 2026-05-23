@@ -17,6 +17,9 @@ it. Designed for rooms of 5–8 people (mesh topology).
 ## Features
 
 - **Voice chat** — P2P mesh, encrypted (DTLS-SRTP); the server never sees audio.
+- **Optional video** — each participant decides whether to turn their camera on;
+  video is added/removed live via WebRTC renegotiation (perfect negotiation).
+  Best for small groups (2–4) due to mesh bandwidth; works on mobile (front camera).
 - **Per-participant volume** — each participant locally adjusts how loudly they
   hear others (0–200%, mute or boost). Only affects their own listening.
 - **Text chat** — sent over a WebRTC DataChannel (P2P, encrypted) — the server
@@ -54,12 +57,29 @@ cp .env.example .env
 # Generate a strong secret:
 openssl rand -hex 32   # -> put it in TURN_SECRET
 # Fill in TURN_HOST, TURN_REALM, PUBLIC_IP
+# Fill in the OIDC_* values (see step 2b) — login won't work without them.
 ```
 
 ### 2. Point DNS
 
 - `voice.your-domain.com`  -> server public IP (the app)
 - `turn.your-domain.com`   -> same IP (coturn)
+
+### 2b. Set up the Authentik OIDC client (required for login)
+
+Login is handled by Authentik (OpenID Connect). In Authentik, create an
+**OAuth2/OpenID Provider** + Application, then:
+
+- Set the provider **Redirect URI** to `https://voice.your-domain.com/auth/callback`.
+- Copy the **Client ID** and **Client Secret** into `.env`
+  (`OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`).
+- Put your Authentik endpoints into `OIDC_AUTHORIZE_URL`, `OIDC_TOKEN_URL`,
+  `OIDC_USERINFO_URL` (see `.../.well-known/openid-configuration`).
+- `OIDC_REDIRECT_URI` must match the Redirect URI above.
+- `OIDC_ADMIN_GROUP` — the Authentik group whose members can kick participants.
+
+`INTERNAL_API_TOKEN` is optional (only for the central admin panel's
+`/internal/set-active` call); leave it empty to disable `/internal/*`.
 
 ### 3. Open ports
 

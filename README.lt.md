@@ -17,6 +17,9 @@ Skirta 5–8 žmonių kambariams (mesh topologija).
 ## Funkcijos
 
 - **Balso pokalbis** — P2P mesh, šifruota (DTLS-SRTP), serveris garso nemato.
+- **Pasirenkamas vaizdas** — kiekvienas dalyvis pats sprendžia, ar įjungti kamerą;
+  vaizdas pridedamas/pašalinamas gyvai per WebRTC renegotiation (perfect negotiation).
+  Geriausia mažoms grupėms (2–4) dėl mesh pralaidumo; veikia ir telefone (priekinė kamera).
 - **Individualus garsumas** — kiekvienas dalyvis lokaliai reguliuoja, kaip garsiai
   girdi kitus (0–200%, gali patildyti arba pagarsinti). Keičia tik savo klausymą.
 - **Tekstinis pokalbis** — keliauja per WebRTC DataChannel (P2P, šifruota) —
@@ -53,12 +56,29 @@ cp .env.example .env
 # Sugeneruok stiprų raktą:
 openssl rand -hex 32   # -> įkelk į TURN_SECRET
 # Užpildyk TURN_HOST, TURN_REALM, PUBLIC_IP
+# Užpildyk OIDC_* reikšmes (žr. 2b žingsnį) — be jų prisijungimas neveiks.
 ```
 
 ### 2. Nukreipk DNS
 
 - `voice.tavo-domenas.lt`  -> serverio viešas IP (programėlei)
 - `turn.tavo-domenas.lt`   -> tas pats IP (coturn)
+
+### 2b. Sukurk Authentik OIDC klientą (būtina prisijungimui)
+
+Prisijungimą tvarko Authentik (OpenID Connect). Authentik'e sukurk
+**OAuth2/OpenID Provider** + Application, tada:
+
+- Provider'io **Redirect URI** nustatyk į `https://voice.tavo-domenas.lt/auth/callback`.
+- **Client ID** ir **Client Secret** įkelk į `.env`
+  (`OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`).
+- Authentik endpoint'us įrašyk į `OIDC_AUTHORIZE_URL`, `OIDC_TOKEN_URL`,
+  `OIDC_USERINFO_URL` (žr. `.../.well-known/openid-configuration`).
+- `OIDC_REDIRECT_URI` turi sutapti su aukščiau nurodytu Redirect URI.
+- `OIDC_ADMIN_GROUP` — Authentik grupė, kurios nariai gali išmesti dalyvius.
+
+`INTERNAL_API_TOKEN` neprivalomas (tik centrinės admin panelės
+`/internal/set-active` kvietimui); palik tuščią, jei nenaudoji.
 
 ### 3. Atidaryk portus
 
